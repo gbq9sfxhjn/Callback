@@ -1,25 +1,14 @@
 import Foundation
 import UIKit
 
-protocol App {
+public protocol App {
 	var id: String { get }
 	var name: String { get }
 	var appStoreID: Int { get }
 	var documentationURL: URL { get }
 }
 
-public enum AppError: Error {
-	case appNotInstalled
-	case couldNotOpenURL
-	case wrongParams
-	
-	/// Returned from external app
-	case canceled
-	case badCallback(url: URL)
-	case appError(code: Int, message: String)
-}
-
-struct LaunchResult {
+public struct LaunchResult {
 	let query: String
 	let queryParams: [URLQueryItem]
 	
@@ -28,7 +17,7 @@ struct LaunchResult {
 	}
 }
 
-typealias LaunchCallback = (Result<LaunchResult, Error>) -> ()
+public typealias LaunchCallback = (Result<LaunchResult, AppLauncher.Error>) -> Void
 
 public class AppLauncher {
 	var completions: [String: LaunchCallback] = [:]
@@ -40,6 +29,17 @@ public class AppLauncher {
 	
 	fileprivate init() { }
 	
+	public enum Error: Swift.Error {
+		case appNotInstalled
+		case couldNotOpenURL
+		case wrongParams
+		
+		/// Returned from external app
+		case canceled
+		case badCallback(url: URL)
+		case appError(code: Int, message: String)
+	}
+	
 	enum CallbackType: String {
 		case success = "g"
 		case error = "b"
@@ -50,7 +50,18 @@ public class AppLauncher {
 		}
 	}
 	
-	func launch(url: String, params: [String: Any] = [:], completion: LaunchCallback? = nil) -> Bool {
+	public func launch(url: String, params: [String: Any] = [:]) async throws -> LaunchResult {
+		return try await withCheckedThrowingContinuation { continuation in
+			let opened = launch(url: url, params: params) { result in
+				continuation.resume(with: result)
+			}
+			if !opened {
+				continuation.resume(throwing: AppLauncher.Error.couldNotOpenURL)
+			}
+		}
+	}
+	
+	public func launch(url: String, params: [String: Any] = [:], completion: LaunchCallback? = nil) -> Bool {
 		guard var comps = URLComponents(string: url) else { return false }
 		var params = params
 		params["x-source"] = AppLauncher.sourceApp
@@ -71,7 +82,7 @@ public class AppLauncher {
 		UIApplication.shared.open(launchURL, options: [:]) { success in
 			if !success {
 				self.completions.removeValue(forKey: uuid)
-				completion?(.failure(AppError.couldNotOpenURL))
+				completion?(.failure(Error.couldNotOpenURL))
 			}
 		}
 		return true
@@ -88,7 +99,7 @@ public class AppLauncher {
 			let type = CallbackType(rawValue: callbackURL.pathComponents[1]),
 			let comps = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)
 		else {
-			completion(.failure(AppError.badCallback(url: callbackURL)))
+			completion(.failure(.badCallback(url: callbackURL)))
 			return false
 		}
 		switch type {
@@ -96,9 +107,9 @@ public class AppLauncher {
 			let result = LaunchResult(query: comps.query ?? "", queryParams: comps.queryItems ?? [])
 			completion(.success(result))
 		case .error:
-			completion(.failure(AppError.appError(code: 0, message: "")))
+			completion(.failure(.appError(code: 0, message: "")))
 		case .cancel:
-			completion(.failure(AppError.canceled))
+			completion(.failure(.canceled))
 		}
 		completions.removeValue(forKey: uuid)
 		return true
