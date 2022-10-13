@@ -12,7 +12,7 @@ public struct LaunchResult {
 	let query: String
 	let queryParams: [URLQueryItem]
 	
-	func value(for param: String) -> String? {
+	public func value(for param: String) -> String? {
 		queryParams.first(where: { $0.name == param })?.value
 	}
 }
